@@ -20,6 +20,17 @@ import r3
 def cli() -> None:
     pass
 
+def _check_repository_path(repository_path):
+    """Helper function with checks if the provided repository_path is a directory.
+
+    Raises a click.UsageError with a suitable message to the user, if it is not a directory.
+    """
+    if repository_path is None or not Path(repository_path).is_dir():
+        raise click.UsageError("""The r3-repository path is not set.
+Either provide a repository as option in the command (`r3 <command> --repository /path/to/repo ...`),
+or set the `R3_REPOSITORY` environment variable to the repository path (`export R3=/path/to/repo`).
+
+You can create an r3-repository with `r3 init /path/to/repo`.""")
 
 @cli.command()
 @click.argument("path", type=click.Path(file_okay=False, exists=False, path_type=Path))
@@ -60,6 +71,7 @@ def commit(path: Path, repository_path: Path) -> None:
     /repository/jobs/4b2146f3-5594-4f05-ae13-2e053ef7bfda
     ```
     """
+    _check_repository_path(repository_path)
     repository = r3.Repository(repository_path)
     job = r3.Job(path)
     job = repository.commit(job)
@@ -140,6 +152,7 @@ def remove(job_path: Path) -> None:
 )
 def find(tags: Iterable[str], latest: bool, long: bool, repository_path: Path) -> None:
     """Searches the R3 repository for jobs matching the given conditions."""
+    _check_repository_path(repository_path)
     repository = r3.Repository(repository_path)
     query = {"tags": {"$all": tags}}
     for job in repository.find(query, latest):
@@ -166,6 +179,7 @@ def rebuild_index(repository_path: Path):
     When job metadata is modified manually, however, the index needs to be rebuilt in
     order for the changes to take effect.
     """
+    _check_repository_path(repository_path)
     repository = r3.Repository(repository_path)
     repository.rebuild_index()
 
