@@ -98,60 +98,90 @@ def git_path_exists(
     return True
 
 
-def git_get_remote_head(repository: Path, remote: str = "origin") -> str:
-    # Setup SSH keys
-    keypair = pygit2.KeypairFromAgent('git')
-    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
-
-    # Get repo as pygit object
+def _get_pygit2_repo(repository_path: Path) -> pygit2.Repository:
     try:
-        repo = pygit2.Repository(repository)
+        repo = pygit2.Repository(repository_path)
     except pygit2.GitError:
         raise ValueError(f"The given path ({repository}) is not a git repository.")
+    return repo
+
+
+def _get_pygit2_remote_callback(username: str = "git") -> pygit2.RemoteCallbacks:
+    keypair = pygit2.KeypairFromAgent(username)
+    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
+    return callbacks
+
+
+def git_get_remote_head(repository: Path, remote: str = "origin") -> str:
+
+    # Get repo as pygit object
+    repo = _get_pygit2_repo(repository)
+    # Get pygit2 callbacks for git authentication at remote
+    callbacks = _get_pygit2_remote_callback()
 
     # List remote revs (== `git ls-remote {remote} HEAD`)
     remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
-    # Get HEAD of remote and return it
-    head_rev = [rev for rev in remote_revs if rev['name'] == 'HEAD'][0]
-    return head_rev['oid']
+    # Find HEAD rev
+    head_rev = next((rev for rev in remote_revs if rev["name"] == "HEAD"), None)
+    assert head_rev is not None # assumption: there is always a HEAD reference for the remote
+    # Return commit hash of HEAD rev
+    return head_rev["oid"].hex
 
 
 def git_get_remote_branch_head(
     repository: Path, branch: str, remote: str = "origin"
 ) -> Optional[str]:
-    # Setup SSH keys
-    keypair = pygit2.KeypairFromAgent('git')
-    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
-
     # Get repo as pygit object
-    try:
-        repo = pygit2.Repository(repository)
-    except pygit2.GitError:
-        raise ValueError(f"The given path ({repository}) is not a git repository.")
+    repo = _get_pygit2_repo(repository)
+    # Get pygit2 callbacks for git authentication at remote
+    callbacks = _get_pygit2_remote_callback()
 
     # List remote revs (== `git ls-remote {remote} {branch}`)
     remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
+
+    print(remote_revs, branch)
     # Get HEAD of remote and return it
-    branch_rev = [rev for rev in remote_revs if rev['name'] == 'refs/heads/' + branch][0]
-    return branch_rev['oid']
+
+    branch_rev = next((rev for rev in remote_revs if rev["name"] == f"refs/heads/{branch}"), None)
+    if branch_rev is None:
+        return None
+    return branch_rev["oid"].hex
 
 
 def git_get_remote_tag_head(
     repository: Path, tag: str, remote: str = "origin"
 ) -> Optional[str]:
-    # Setup SSH keys
-    keypair = pygit2.KeypairFromAgent('git')
-    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
-
     # Get repo as pygit object
-    try:
-        repo = pygit2.Repository(repository)
-    except pygit2.GitError:
-        raise ValueError(f"The given path ({repository}) is not a git repository.")
+    repo = _get_pygit2_repo(repository)
+    # Get pygit2 callbacks for git authentication at remote
+    callbacks = _get_pygit2_remote_callback()
 
     # `git fetch {remote}`
     repo.remotes[remote].fetch(callbacks=callbacks)
 
     remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
-    tag_rev = [rev for rev in remote_revs if rev['name'] == 'refs/tags/' + tag + '^{}'][0]
-    return tag_rev['oid']
+    tag_rev = next((rev for rev in remote_revs if rev["name"] == f"refs/tags/{tag}^{{}}"), None)
+    if tag_rev is None:
+        return None
+    return tag_rev["oid"].hex
+
+def git_clone_repository(repository_url: str, repository_path: Path):
+
+    # Makes cloned repo a mirror of the remote
+    def init_remote(repo, name, url):
+        # Create the remote with a mirroring url
+        remote = repo.remotes.create(name, url, "+refs/*:refs/*")
+        # And set the configuration option to true for the push command
+        mirror_var = f"remote.{name.decode()}.mirror"
+        repo.config[mirror_var] = True
+        return remote
+
+    callbacks = _get_pygit2_remote_callback()
+    repo = pygit2.clone_repository(repository_url, repository_path, callbacks=callbacks, bare=True, remote=init_remote)
+
+
+def git_fetch_repository(repository_path: Path, remote: str = "origin"):
+
+    callbacks = _get_pygit2_remote_callback()
+    repo = _get_pygit2_repo(repository_path)
+    repo.remotes[remote].fetch(callbacks=callbacks)
