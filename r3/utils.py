@@ -1,8 +1,7 @@
 import hashlib
 from pathlib import Path
 from typing import Iterable, List, Optional
-
-from executor import ExternalCommandFailed, execute
+import pygit2
 
 
 def find_files(path: Path, ignore_patterns: Iterable[str]) -> List[Path]:
@@ -55,13 +54,11 @@ def hash_str(string: str) -> str:
 
 def git_commit_exists(repository: Path, commit: str) -> bool:
     try:
-        object_type = execute(
-            f"git cat-file -t {commit}", directory=repository, capture=True
-        )
-    except ExternalCommandFailed:
+        repo = pygit2.Repository(repository)
+        commit = repo.revparse_single(commit)
+    except KeyError:
         return False
-
-    return object_type == "commit"
+    return isinstance(commit, pygit2.Commit)
 
 
 def git_path_exists(
@@ -78,50 +75,83 @@ def git_path_exists(
     if path == Path("."):
         return git_commit_exists(repository, commit)
 
-    else:
-        try:
-            execute(
-                f"git ls-tree -r {commit} --name-only | grep '^{path}'",
-                directory=repository,
-                capture=True,
-            )
-        except ExternalCommandFailed:
-            return False
+    path = (Path(repository) / Path(path)).resolve().relative_to(repository)
+    # Check if git repo exists
+    try:
+        repo = pygit2.Repository(repository)
+    except pygit2.GitError:
+        return False
+    # Check if git commit exists
+    try:
+        commit = repo.revparse_single(commit)
+    except KeyError:
+        return False
 
-        return True
+    tree = commit.tree
+    # traverse commit tree with the given path
+    current_tree = tree
+    for part in path.parts:
+        try:
+            current_tree = repo[current_tree[part].id]
+        except KeyError:
+            return False
+    return True
 
 
 def git_get_remote_head(repository: Path, remote: str = "origin") -> str:
-    return execute(
-        f"git ls-remote {remote} HEAD",
-        directory=repository,
-        capture=True,
-    ).split()[0]
+    # Setup SSH keys
+    keypair = pygit2.KeypairFromAgent('git')
+    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
+
+    # Get repo as pygit object
+    try:
+        repo = pygit2.Repository(repository)
+    except pygit2.GitError:
+        raise ValueError(f"The given path ({repository}) is not a git repository.")
+
+    # List remote revs (== `git ls-remote {remote} HEAD`)
+    remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
+    # Get HEAD of remote and return it
+    head_rev = [rev for rev in remote_revs if rev['name'] == 'HEAD'][0]
+    return head_rev['oid']
 
 
 def git_get_remote_branch_head(
     repository: Path, branch: str, remote: str = "origin"
 ) -> Optional[str]:
-    output = execute(
-        f"git ls-remote --heads {remote} {branch}",
-        directory=repository,
-        capture=True,
-    )
-    if len(output.split()) == 0:
-        return None
-    return output.split()[0]
+    # Setup SSH keys
+    keypair = pygit2.KeypairFromAgent('git')
+    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
+
+    # Get repo as pygit object
+    try:
+        repo = pygit2.Repository(repository)
+    except pygit2.GitError:
+        raise ValueError(f"The given path ({repository}) is not a git repository.")
+
+    # List remote revs (== `git ls-remote {remote} {branch}`)
+    remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
+    # Get HEAD of remote and return it
+    branch_rev = [rev for rev in remote_revs if rev['name'] == 'refs/heads/' + branch][0]
+    return branch_rev['oid']
 
 
 def git_get_remote_tag_head(
     repository: Path, tag: str, remote: str = "origin"
 ) -> Optional[str]:
-    execute(f"git fetch --tags {remote}", directory=repository, capture=True)
+    # Setup SSH keys
+    keypair = pygit2.KeypairFromAgent('git')
+    callbacks = pygit2.RemoteCallbacks(credentials=keypair)
+
+    # Get repo as pygit object
     try:
-        output = execute(
-            f"git rev-list --tags --max-count=1 {tag}",
-            directory=repository,
-            capture=True,
-        )
-    except ExternalCommandFailed:
-        return None
-    return output.split()[0]
+        repo = pygit2.Repository(repository)
+    except pygit2.GitError:
+        raise ValueError(f"The given path ({repository}) is not a git repository.")
+
+    # `git fetch {remote}`
+    repo.remotes[remote].fetch(callbacks=callbacks)
+
+    remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
+    tag_rev = [rev for rev in remote_revs if rev['name'] == 'refs/tags/' + tag + '^{}'][0]
+    return tag_rev['oid']
