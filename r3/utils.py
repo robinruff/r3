@@ -1,6 +1,7 @@
 import hashlib
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Union
+
 import pygit2
 
 
@@ -101,8 +102,10 @@ def git_path_exists(
 def _get_pygit2_repo(repository_path: Path) -> pygit2.Repository:
     try:
         repo = pygit2.Repository(repository_path)
-    except pygit2.GitError:
-        raise ValueError(f"The given path ({repository}) is not a git repository.")
+    except pygit2.GitError as e:
+        raise ValueError(
+                f"The given path ({repository_path}) is not a git repository."
+                ) from e
     return repo
 
 
@@ -123,7 +126,7 @@ def git_get_remote_head(repository: Path, remote: str = "origin") -> str:
     remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
     # Find HEAD rev
     head_rev = next((rev for rev in remote_revs if rev["name"] == "HEAD"), None)
-    assert head_rev is not None # assumption: there is always a HEAD reference for the remote
+    assert head_rev is not None # assumption: there is always a HEAD reference on remote
     # Return commit hash of HEAD rev
     return head_rev["oid"].hex
 
@@ -139,10 +142,10 @@ def git_get_remote_branch_head(
     # List remote revs (== `git ls-remote {remote} {branch}`)
     remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
 
-    print(remote_revs, branch)
-    # Get HEAD of remote and return it
-
-    branch_rev = next((rev for rev in remote_revs if rev["name"] == f"refs/heads/{branch}"), None)
+    # Get branch of remote and return it
+    branch_rev = next(
+            (rev for rev in remote_revs if rev["name"] == f"refs/heads/{branch}"),
+            None)
     if branch_rev is None:
         return None
     return branch_rev["oid"].hex
@@ -160,7 +163,9 @@ def git_get_remote_tag_head(
     repo.remotes[remote].fetch(callbacks=callbacks)
 
     remote_revs = repo.remotes[remote].ls_remotes(callbacks=callbacks)
-    tag_rev = next((rev for rev in remote_revs if rev["name"] == f"refs/tags/{tag}^{{}}"), None)
+    tag_rev = next(
+            (rev for rev in remote_revs if rev["name"] == f"refs/tags/{tag}^{{}}"),
+            None)
     if tag_rev is None:
         return None
     return tag_rev["oid"].hex
@@ -177,7 +182,8 @@ def git_clone_repository(repository_url: str, repository_path: Path):
         return remote
 
     callbacks = _get_pygit2_remote_callback()
-    repo = pygit2.clone_repository(repository_url, repository_path, callbacks=callbacks, bare=True, remote=init_remote)
+    pygit2.clone_repository(repository_url, repository_path,
+                                   callbacks=callbacks, bare=True, remote=init_remote)
 
 
 def git_fetch_repository(repository_path: Path, remote: str = "origin"):
@@ -185,3 +191,24 @@ def git_fetch_repository(repository_path: Path, remote: str = "origin"):
     callbacks = _get_pygit2_remote_callback()
     repo = _get_pygit2_repo(repository_path)
     repo.remotes[remote].fetch(callbacks=callbacks)
+
+
+def git_create_r3_tag(repository_path: Path, commit: str, job_id: str):
+    repo = _get_pygit2_repo(repository_path)
+    tagger = pygit2.Signature('r3', 'r3@example.com')
+    repo.create_tag(f"r3/{job_id}", # tag name
+                    commit, # commit hash
+                    pygit2.enums.ObjectType.COMMIT, # tag of type commit
+                    tagger, # the identity associated with the tag
+                    f"tag created by r3 for job {job_id}" # tag message
+                    ) 
+
+def is_dir_git_repository(path: Union[str, Path]):
+    path = Path(path)
+    if not path.is_dir():
+        raise ValueError(f"Not a directory: {path}")
+    try:
+        pygit2.Repository(path)
+    except pygit2.GitError:
+        return False
+    return True

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Union
 
 import yaml
-from executor import execute
 
 import r3
 import r3.utils
@@ -122,12 +121,10 @@ class Repository:
             repository_path = self.path / resolved_item.repository_path
 
             if not repository_path.exists():
-                execute(
-                    f"git clone --bare {resolved_item.repository} {repository_path}"
-                )
+                r3.utils.git_clone_repository(resolved_item.repository, repository_path)
 
             if not r3.utils.git_commit_exists(repository_path, resolved_item.commit):
-                execute("git fetch origin *:* --force", directory=repository_path)
+                r3.utils.git_fetch_repository(repository_path)
 
             return r3.utils.git_path_exists(
                 repository_path,
@@ -370,7 +367,7 @@ class Repository:
     def _resolve_git_dependency(self, dependency: GitDependency) -> GitDependency:
         repository_path = self.path / dependency.repository_path
         if not repository_path.exists():
-            execute(f"git clone --bare {dependency.repository} {repository_path}")
+            r3.utils.git_clone_repository(dependency.repository, repository_path)
         
         if dependency.branch is not None:
             commit = r3.utils.git_get_remote_branch_head(

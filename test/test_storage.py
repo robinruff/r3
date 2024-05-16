@@ -331,11 +331,7 @@ def test_checkout_job_checks_out_git_dependencies(
     }]
 
     # Prevent calling `git tag` when using the fake filesystem.
-    def patched_execute(command: str, **kwargs):
-        if command.startswith("git tag"):
-            return
-        return execute(command, **kwargs)
-    mocker.patch("r3.storage.execute", new=patched_execute)
+    mocker.patch('r3.storage.git_create_r3_tag')
 
     committed_job = storage.add(original_job)
 

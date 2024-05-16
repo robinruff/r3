@@ -14,6 +14,7 @@ import yaml
 from executor import execute
 
 from r3.job import Dependency, GitDependency, Job, JobDependency
+from r3.utils import git_create_r3_tag
 
 
 class Storage:
@@ -119,10 +120,7 @@ class Storage:
         for dependency in job.dependencies:
             if isinstance(dependency, GitDependency):
                 repository_path = self.root / dependency.repository_path
-                execute(
-                    f"git tag r3/{job_id} {dependency.commit}",
-                    directory=repository_path,
-                )
+                git_create_r3_tag(repository_path, dependency.commit, job_id)
 
         os.mkdir(job_path)
         os.mkdir(job_path / "output")

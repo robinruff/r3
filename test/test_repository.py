@@ -153,32 +153,23 @@ def test_repository_contains_git_dependency_clones_repository(
     # If the repository specified by a GitDependency does not exist locally yet, the
     # __contains__ method should clone the repository before checking whether the
     # commit exists.
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     repository = Repository.init(tmp_path / "r3")
     dependency = GitDependency(
-        repository=origin_url,
+        repository=str(origin.path),
         commit=origin.head_commit(),
         destination="destination",
     )
 
-    git_clone_called = False
-
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        nonlocal git_clone_called
-        if command.startswith("git clone"):
-            git_clone_called = True
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
-
+    import r3.utils
+    assert not Path(repository.path / dependency.repository_path).exists()
+    clone_spy = mocker.spy(r3.utils, "git_clone_repository")
+    clone_spy.assert_not_called()
     assert dependency in repository
-    assert git_clone_called
-
-    git_clone_called = False
+    clone_spy.assert_called_once()
+    assert Path(repository.path / dependency.repository_path).exists()
     assert dependency in repository
-    assert not git_clone_called
+    clone_spy.assert_called_once()
 
 
 def test_repository_contains_git_dependency_fetches_all_branches(
@@ -187,64 +178,45 @@ def test_repository_contains_git_dependency_fetches_all_branches(
     # If the commit specified by a GitDependency does not exists locally yet, the
     # __contains__ method should fetch all branches before checking whether the commit
     # exists.
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     repository = Repository.init(tmp_path / "r3")
     dependency = GitDependency(
-        repository=origin_url,
+        repository=str(origin.path),
         commit=origin.head_commit(),
         destination="destination",
     )
-
-    git_fetch_called = False
-
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        nonlocal git_fetch_called
-        if command.startswith("git fetch"):
-            git_fetch_called = True
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
-
+    import r3.utils
+    assert not Path(repository.path / dependency.repository_path).exists()
+    fetch_spy = mocker.spy(r3.utils, "git_fetch_repository")
     assert dependency in repository
-    assert not git_fetch_called
+    fetch_spy.assert_not_called()
 
     origin.update()
     dependency.commit = origin.head_commit()
 
     assert dependency in repository
-    assert git_fetch_called
-    git_fetch_called = False
+    fetch_spy.assert_called_once()
 
     origin.update_branch()
     dependency.commit = origin.head_commit()
     assert dependency in repository
-    assert git_fetch_called
-    git_fetch_called = False
+    assert fetch_spy.call_count == 2
 
     dependency.commit = "does-not-exist"
     assert dependency not in repository
-    assert git_fetch_called
+    assert fetch_spy.call_count == 3
 
 
 def test_repository_contains_git_dependency_fails_if_commit_does_not_exist(
     tmp_path: Path, mocker: MockerFixture,
 ) -> None:
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     repository = Repository.init(tmp_path / "r3")
     dependency = GitDependency(
-        repository=origin_url,
+        repository=str(origin.path),
         commit="does-not-exist",
         destination="destination",
     )
-
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
 
     assert dependency not in repository
 
@@ -252,21 +224,14 @@ def test_repository_contains_git_dependency_fails_if_commit_does_not_exist(
 def test_repository_contains_git_dependency_checks_whether_source_exists(
     tmp_path: Path, mocker: MockerFixture,
 ) -> None:
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     repository = Repository.init(tmp_path / "r3")
     dependency = GitDependency(
-        repository=origin_url,
+        repository=str(origin.path),
         commit=origin.head_commit(),
         source="test.txt",
         destination="destination.txt",
     )
-
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
 
     assert dependency in repository
 
@@ -390,14 +355,13 @@ def test_commit_copies_nested_files(repository: Repository) -> None:
 def test_commit_adds_git_tags_to_prevent_garbage_collection(
     tmp_path: Path, mocker: MockerFixture,
 ) -> None:
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     origin.update()
 
     repository = Repository.init(tmp_path / "r3")
 
     dependency = GitDependency(
-        repository=origin_url,
+        repository=str(origin.path),
         commit=origin.head_commit(),
         destination="destination",
     )
@@ -410,24 +374,18 @@ def test_commit_adds_git_tags_to_prevent_garbage_collection(
         file.write("print('Hello, world!')")
     job = Job(job_path)
 
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
-
     job = repository.commit(job)
 
     clone_path = repository.path / dependency.repository_path
     tags = execute("git tag", directory=clone_path, capture=True)
     assert f"r3/{job.id}" in tags.splitlines()
-    ref = execute(f"git rev-parse r3/{job.id}", directory=clone_path, capture=True)
+    ref = execute(f"git rev-parse r3/{job.id}^{{}}", directory=clone_path, capture=True)
     assert ref.strip() == dependency.commit
 
     origin.force_update()
 
     updated_dependency = GitDependency(
-        repository=origin_url,
+        repository=str(origin.path),
         commit=origin.head_commit(),
         destination="destination",
     )
@@ -638,18 +596,11 @@ def test_resolve_query_all_dependency(repository: Repository) -> None:
 
 
 def test_resolve_git_dependency_from_url(tmp_path: Path, mocker: MockerFixture) -> None:
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
 
     repository = Repository.init(tmp_path / "r3")
 
-    dependency = GitDependency("destination", origin_url)
-
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
+    dependency = GitDependency("destination", str(origin.path))
 
     resolved_dependency = repository.resolve(dependency)
     assert isinstance(resolved_dependency, GitDependency)
@@ -667,7 +618,6 @@ def test_resolve_git_dependency_from_url(tmp_path: Path, mocker: MockerFixture) 
 def test_resolve_git_dependency_from_branch(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     origin.update_branch()
     branch_commit = origin.head_commit()
@@ -676,31 +626,24 @@ def test_resolve_git_dependency_from_branch(
 
     repository = Repository.init(tmp_path / "r3")
 
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        return execute(command, **kwargs)
-
-    mocker.patch("r3.repository.execute", new=patched_execute)
-
-    dependency = GitDependency("destination", origin_url, branch="main")
+    dependency = GitDependency("destination", str(origin.path), branch="main")
     resolved_dependency = repository.resolve(dependency)
     assert isinstance(resolved_dependency, GitDependency)
     assert resolved_dependency.is_resolved()
     assert resolved_dependency.commit == main_commit
 
-    dependency = GitDependency("destination", origin_url, branch="branch")
+    dependency = GitDependency("destination", str(origin.path), branch="branch")
     resolved_dependency = repository.resolve(dependency)
     assert isinstance(resolved_dependency, GitDependency)
     assert resolved_dependency.is_resolved()
     assert resolved_dependency.commit == branch_commit
 
-    dependency = GitDependency("destination", origin_url, branch="does-not-exist")
+    dependency = GitDependency("destination", str(origin.path), branch="does-not-exist")
     with pytest.raises(ValueError):
         repository.resolve(dependency)
 
 
 def test_resolve_git_dependency_from_tag(tmp_path: Path, mocker: MockerFixture) -> None:
-    origin_url = "git@github.com:mtangemann/origin.git"
     origin = ExampleGitRepository(tmp_path / "origin")
     origin.add_tag("test")
     tag_commit = origin.head_commit()
@@ -708,19 +651,14 @@ def test_resolve_git_dependency_from_tag(tmp_path: Path, mocker: MockerFixture) 
 
     repository = Repository.init(tmp_path / "r3")
 
-    def patched_execute(command, **kwargs):
-        command = command.replace(origin_url, str(origin.path))
-        return execute(command, **kwargs)
 
-    mocker.patch("r3.repository.execute", new=patched_execute)
-
-    dependency = GitDependency("destination", origin_url, tag="test")
+    dependency = GitDependency("destination", str(origin.path), tag="test")
     resolved_dependency = repository.resolve(dependency)
     assert isinstance(resolved_dependency, GitDependency)
     assert resolved_dependency.is_resolved()
     assert resolved_dependency.commit == tag_commit
 
-    dependency = GitDependency("destination", origin_url, tag="does-not-exist")
+    dependency = GitDependency("destination", str(origin.path), tag="does-not-exist")
     with pytest.raises(ValueError):
         repository.resolve(dependency)
 

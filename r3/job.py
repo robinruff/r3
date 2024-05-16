@@ -1,10 +1,12 @@
 import abc
 import os
+import platform
 import re
 import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
+from urllib.parse import urlparse
 
 import yaml
 
@@ -686,17 +688,30 @@ class GitDependency(Dependency):
     @property
     def repository_path(self) -> Path:
         """Returns the path where the repository will stored in R3."""
-        https_pattern = r"^https://github\.com/([^/]+)/([^/\.]+)(?:\.git)?$"
-        match = re.match(https_pattern, self.repository)
-        if match:
-            return Path("git") / "github.com" / match.group(1) / match.group(2)
 
-        ssh_pattern = r"^git@github\.com:([^/]+)/([^/\.]+)(?:\.git)?$"
+        # HTTP(S) URLs
+        parsed_url = urlparse(self.repository)
+        if parsed_url.scheme in ["http", "https"]:
+            path = parsed_url.path
+            # Cut off .git at the end, if it exists
+            path = path[:-4] if path.endswith(".git") else path
+            return Path("git") / parsed_url.hostname / path[1:]
+
+        # SSH URLs
+        ssh_pattern = r"^git@([^:]+):(.*?)(?:\.git)?$"
         match = re.match(ssh_pattern, self.repository)
-        if match:
-            return Path("git") / "github.com" / match.group(1) / match.group(2)
+        if match is not None:
+            return Path("git") / match.group(1) / match.group(2)
 
-        raise ValueError(f"Unrecognized git url: {self.repository}")
+        # Local File URLs
+        local_dir = Path(self.repository)
+        if not local_dir.is_dir():
+            raise ValueError(f"Unrecognized git url: {self.repository}")
+        if not r3.utils.is_dir_git_repository(self.repository):
+            raise ValueError(f"Not a git directory: {self.repository}")
+        hostname = platform.node()
+        return Path("git") / hostname / str(local_dir)[1:]
+
 
     @staticmethod
     def from_config(config: Dict[str, str]) -> "GitDependency":
