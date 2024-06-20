@@ -14,7 +14,7 @@ import yaml
 from executor import execute
 
 from r3.job import Dependency, GitDependency, Job, JobDependency
-from r3.utils import git_create_r3_tag
+from r3.utils import git_create_r3_tag, git_clone_single_commit
 
 
 class Storage:

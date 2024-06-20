@@ -172,10 +172,11 @@ def git_get_remote_tag_head(
 
 def git_clone_repository(repository_url: str, repository_path: Path):
 
+    refspec = "+refs/*:refs/*"
     # Makes cloned repo a mirror of the remote
     def init_remote(repo, name, url):
         # Create the remote with a mirroring url
-        remote = repo.remotes.create(name, url, "+refs/*:refs/*")
+        remote = repo.remotes.create(name, url, refspec)
         # And set the configuration option to true for the push command
         mirror_var = f"remote.{name.decode()}.mirror"
         repo.config[mirror_var] = True
@@ -184,6 +185,23 @@ def git_clone_repository(repository_url: str, repository_path: Path):
     callbacks = _get_pygit2_remote_callback()
     pygit2.clone_repository(repository_url, repository_path,
                                    callbacks=callbacks, bare=True, remote=init_remote)
+
+def git_clone_single_commit(repository_url: str, repository_path: Path, tag: str):
+
+    refspec = f"+/refs/tags/{tag}:refs/tags/{tag}"
+    # Makes cloned repo a mirror of the remote
+    def init_remote(repo, name, url):
+        # Create the remote with a mirroring url
+        remote = repo.remotes.create(name, url, refspec)
+        # And set the configuration option to true for the push command
+        mirror_var = f"remote.{name.decode()}.mirror"
+        repo.config[mirror_var] = True
+        return remote
+
+    callbacks = _get_pygit2_remote_callback()
+    pygit2.clone_repository(repository_url, repository_path, depth=1,
+                            callbacks=callbacks, bare=False, remote=init_remote)
+
 
 
 def git_fetch_repository(repository_path: Path, remote: str = "origin"):
